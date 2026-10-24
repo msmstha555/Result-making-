@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Result Maker: Excel to Grades and GPA</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{--bg:#f3f5f2;--card:#fff;--ink:#1d2a24;--mute:#66736c;--line:#dbe1dc;--accent:#1f6f54;--bad:#b3392f}
+@media (prefers-color-scheme:dark){:root{--bg:#141a17;--card:#1c2420;--ink:#e6ede9;--mute:#90a099;--line:#2c3832;--accent:#4cc79a;--bad:#ff8a7e}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Georgia,"Times New Roman",serif}
+main{max-width:1000px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:2rem;margin:0 0 4px}
+.sub{color:var(--mute);margin:0 0 24px}
+section{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:18px;margin-bottom:16px}
+h2{font-size:1.1rem;margin:0 0 12px}
+label{display:block;font-size:.9rem;color:var(--mute);margin-bottom:4px}
+input,select,button{font:inherit;color:inherit}
+input[type=text],input[type=number],select{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:4px;background:var(--bg)}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.or{text-align:center;color:var(--mute);margin:12px 0}
+button{padding:9px 16px;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:4px;cursor:pointer}
+button.alt{background:transparent;color:var(--accent)}
+button.sm{padding:3px 10px;font-size:.85rem}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.drop{border:2px dashed var(--line);border-radius:6px;padding:22px;text-align:center;color:var(--mute)}
+.drop input{margin-top:8px}
+.link{display:flex;gap:8px}
+.msg{margin:10px 0 0;color:var(--mute)}
+.msg.err{color:var(--bad)}
+.wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.95rem}
+th,td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{background:var(--bg)}
+#subTable td input,#subTable td select{min-width:70px}
+#subTable td.n input{min-width:130px}
+.fail{color:var(--bad);font-weight:bold}
+.pass{color:var(--accent);font-weight:bold}
+.stats{display:flex;gap:24px;flex-wrap:wrap;margin-bottom:12px;color:var(--mute)}
+.stats b{color:var(--ink);font-size:1.2rem}
+.actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.ms h3{margin:0 0 2px;font-size:1.3rem}
+.ms .meta{color:var(--mute);margin:0 0 10px}
+.ms td small{color:var(--mute);margin-left:4px}
+.ms tfoot td{font-weight:bold;border-top:2px solid var(--ink)}
+.ms td.c,.ms th.c{text-align:center}
+#sheets{display:none}
+[hidden]{display:none!important}
+@media print{
+  body.ps{background:#fff;color:#000}
+  body.ps main>*:not(#sheets){display:none}
+  body.ps #sheets{display:block}
+  body.ps .ms{page-break-after:always;padding:20px}
+  body.ps .ms td,body.ps .ms th{border-bottom:1px solid #999}
+}
+</style>
+</head>
+<body>
+<main>
+  <h1>Result Maker</h1>
+  <p class="sub">Upload an Excel sheet or paste a Google Sheets link. Get theory, practical and total grades with GPA, final GPA, final grade and attendance. Nothing leaves your browser.</p>
+
+  <section>
+    <h2>1. Add your sheet</h2>
+    <div class="drop">
+      Choose an Excel or CSV file (.xlsx, .xls, .csv)<br>
+      <input type="file" id="file" accept=".xlsx,.xls,.csv">
+    </div>
+    <div class="or">or</div>
+    <div class="link">
+      <input type="text" id="url" placeholder="https://docs.google.com/spreadsheets/d/..." aria-label="Google Sheets link">
+      <button id="load" class="alt">Load link</button>
+    </div>
+    <p class="msg" id="msg">The Google Sheet must be shared as "Anyone with the link can view".</p>
+    <div id="sheetPick" hidden style="margin-top:10px"><label for="sheetSel">Sheet tab (one per class works well)</label><select id="sheetSel"></select></div>
+  </section>
+
+  <section id="setup" hidden>
+    <h2>2. Set up subjects for this class</h2>
+    <div class="row">
+      <div><label for="nameCol">Student name column</label><select id="nameCol"></select></div>
+      <div><label for="attCol">Attendance column</label><select id="attCol"></select></div>
+      <div><label for="days">Total school days</label><input type="number" id="days" min="0" placeholder="Leave empty if already %"></div>
+    </div>
+    <label style="margin-top:14px">Subjects (detected from your columns, fix anything that looks wrong)</label>
+    <div class="wrap"><table id="subTable">
+      <thead><tr><th>Use</th><th>Subject</th><th>Theory column</th><th>Theory full marks</th><th>Practical column</th><th>Practical full marks</th><th>Credit hours</th></tr></thead>
+      <tbody id="subBody"></tbody>
+    </table></div>
+    <label style="margin-top:12px;display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="failComp" checked> Subject is NG if theory or practical alone is NG</label>
+    <div class="actions"><button id="go">Generate result</button></div>
+  </section>
+
+  <section id="out" hidden>
+    <h2>3. Class result</h2>
+    <div class="stats" id="stats"></div>
+    <div class="wrap"><table id="table"></table></div>
+    <div class="actions">
+      <button id="dl">Download Excel</button>
+      <button id="prAll" class="alt">Print all marksheets / Save as PDF</button>
+    </div>
+  </section>
+
+  <section id="view" hidden>
+    <div id="one"></div>
+    <div class="actions"><button id="prOne" class="alt">Print this marksheet</button></div>
+  </section>
+
+  <div id="sheets"></div>
+</main>
+
+<script>
+/* Edit this table to change grade boundaries and GPA: [minimum %, grade, GPA] */
+const GRADES=[[90,'A+',4.0],[80,'A',3.6],[70,'B+',3.2],[60,'B',2.8],[50,'C+',2.4],[40,'C',2.0],[30,'D+',1.6]];
+const grade=p=>{for(const [m,g] of GRADES) if(p>=m) return g; return 'NG';};
+const gpaOf=g=>{const x=GRADES.find(a=>a[1]===g);return x?x[2]:0;};
+
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let wb=null,rows=[],headers=[],students=[],cfg=[];
+
+function say(t,err){const m=$('msg');m.textContent=t;m.className='msg'+(err?' err':'');}
+
+$('file').addEventListener('change',e=>{
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=ev=>{try{openBook(XLSX.read(ev.target.result,{type:'array'}));say('Loaded '+f.name);}catch(x){say('Could not read this file.',true);}};
+  r.readAsArrayBuffer(f);
+});
+
+$('load').addEventListener('click',async()=>{
+  const u=$('url').value.trim();
+  const m=u.match(/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  if(!m){say('Paste a full Google Sheets link.',true);return;}
+  const gid=(u.match(/[#&?]gid=(\d+)/)||[])[1];
+  const api=`https://docs.google.com/spreadsheets/d/${m[1]}/gviz/tq?tqx=out:csv${gid?'&gid='+gid:''}`;
+  say('Loading...');
+  try{
+    const res=await fetch(api);if(!res.ok)throw 0;
+    const txt=await res.text();if(txt.trim().startsWith('<'))throw 0;
+    openBook(XLSX.read(txt,{type:'string'}));say('Loaded Google Sheet.');
+  }catch(x){say('Could not load the link. Check that sharing is "Anyone with the link", or upload the file instead.',true);}
+});
+
+function openBook(book){
+  wb=book;
+  $('sheetSel').innerHTML=wb.SheetNames.map((n,i)=>`<option value="${i}">${esc(n)}</option>`).join('');
+  $('sheetPick').hidden=wb.SheetNames.length<2;
+  useSheet(0);
+}
+$('sheetSel').addEventListener('change',e=>useSheet(+e.target.value));
+
+const isNum=h=>rows.filter(r=>r[h]!==''&&!isNaN(+r[h])).length>=rows.length*.6;
+
+function useSheet(i){
+  rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[i]],{defval:''});
+  if(!rows.length){say('This sheet has no data rows.',true);$('setup').hidden=true;return;}
+  headers=Object.keys(rows[0]);
+  $('nameCol').innerHTML=headers.map(h=>`<option>${esc(h)}</option>`).join('');
+  $('nameCol').value=headers.find(h=>/name/i.test(h))||headers.find(h=>!isNum(h))||headers[0];
+  $('attCol').innerHTML='<option value="">No attendance</option>'+headers.map(h=>`<option>${esc(h)}</option>`).join('');
+  $('attCol').value=headers.find(h=>/attend/i.test(h))||'';
+  drawSubjects();
+  $('setup').hidden=false;$('out').hidden=true;$('view').hidden=true;
+}
+
+function drawSubjects(){
+  const nc=$('nameCol').value,att=$('attCol').value,map=new Map();
+  headers.filter(h=>h!==nc&&h!==att&&isNum(h)).forEach(h=>{
+    const m=h.match(/^(.*?)[\s_\-\(\[]+(theory|practical|prac|th|pr|t|p)[\)\]]?$/i);
+    let name=h,type='t';
+    if(m&&m[1].trim()){name=m[1].trim();type=/^(p|pr|prac|practical)$/i.test(m[2])?'p':'t';}
+    const k=name.toLowerCase().replace(/[^a-z0-9]/g,'');
+    if(!map.has(k))map.set(k,{name,t:'',p:''});
+    map.get(k)[type]=h;
+  });
+  const opts=sel=>'<option value="">None</option>'+headers.map(h=>`<option ${h===sel?'selected':''}>${esc(h)}</option>`).join('');
+  $('subBody').innerHTML=[...map.values()].map(s=>{
+    const both=s.t&&s.p;
+    return `<tr><td><input type="checkbox" class="inc" checked></td>
+    <td class="n"><input type="text" class="nm" value="${esc(s.name)}"></td>
+    <td><select class="tc">${opts(s.t)}</select></td><td><input type="number" class="tf" value="${both?75:100}"></td>
+    <td><select class="pc">${opts(s.p)}</select></td><td><input type="number" class="pf" value="${s.p?(both?25:100):0}"></td>
+    <td><input type="number" class="cr" value="1" step="0.5"></td></tr>`;}).join('');
+}
+$('nameCol').addEventListener('change',drawSubjects);
+$('attCol').addEventListener('change',drawSubjects);
+
+$('go').addEventListener('click',()=>{
+  cfg=[...document.querySelectorAll('#subBody tr')].filter(tr=>tr.querySelector('.inc').checked).map(tr=>({
+    name:tr.querySelector('.nm').value||'Subject',t:tr.querySelector('.tc').value,p:tr.querySelector('.pc').value,
+    tf:+tr.querySelector('.tf').value||0,pf:+tr.querySelector('.pf').value||0,cr:+tr.querySelector('.cr').value||1}))
+    .filter(s=>s.t||s.p);
+  if(!cfg.length){alert('Pick at least one subject with a theory or practical column.');return;}
+  const nc=$('nameCol').value,att=$('attCol').value,days=+$('days').value,failComp=$('failComp').checked;
+  students=rows.map(r=>{
+    let sumM=0,sumF=0,sumGp=0,sumCr=0,failed=false;
+    const subs=cfg.map(s=>{
+      const t=s.t?(+r[s.t]||0):null,p=s.p?(+r[s.p]||0):null;
+      const tp=s.t&&s.tf?t/s.tf*100:null,pp=s.p&&s.pf?p/s.pf*100:null;
+      const mk=(t||0)+(p||0),full=(s.t?s.tf:0)+(s.p?s.pf:0),pct=full?mk/full*100:0;
+      const gT=tp==null?'-':grade(tp),gP=pp==null?'-':grade(pp);
+      let gTot=grade(pct);
+      if(failComp&&(gT==='NG'||gP==='NG'))gTot='NG';
+      const gpa=gpaOf(gTot);
+      if(gTot==='NG')failed=true;
+      sumM+=mk;sumF+=full;sumGp+=gpa*s.cr;sumCr+=s.cr;
+      return {name:s.name,t,p,tf:s.tf,pf:s.pf,gT,gP,gTot,gpa,mk,full};
+    });
+    const pct=sumF?sumM/sumF*100:0;
+    let a=null;
+    if(att){a=+r[att]||0;if(days>0)a=a/days*100;}
+    return {name:r[nc],att:a,subs,pct,gpa:sumCr?sumGp/sumCr:0,grade:failed?'NG':grade(pct),result:failed?'Fail':'Pass'};
+  });
+  drawSummary();
+  $('out').hidden=false;$('view').hidden=true;
+  $('out').scrollIntoView({behavior:'smooth'});
+});
+
+function drawSummary(){
+  const hasAtt=!!$('attCol').value;
+  $('table').innerHTML='<tr><th>Name</th>'+(hasAtt?'<th>Attendance</th>':'')+'<th>Total %</th><th>Final GPA</th><th>Final grade</th><th>Result</th><th></th></tr>'+
+    students.map((s,i)=>`<tr><td>${esc(s.name)}</td>${hasAtt?`<td>${s.att.toFixed(1)}%</td>`:''}<td>${s.pct.toFixed(1)}%</td><td>${s.gpa.toFixed(2)}</td><td>${s.grade}</td>
+    <td class="${s.result==='Pass'?'pass':'fail'}">${s.result}</td><td><button class="sm alt" data-i="${i}">Marksheet</button></td></tr>`).join('');
+  const passed=students.filter(s=>s.result==='Pass').length;
+  const avg=students.reduce((a,s)=>a+s.gpa,0)/students.length;
+  $('stats').innerHTML=`<div><b>${students.length}</b><br>students</div><div><b>${passed}</b><br>passed</div><div><b>${students.length-passed}</b><br>failed</div><div><b>${avg.toFixed(2)}</b><br>average GPA</div>`;
+}
+$('table').addEventListener('click',e=>{
+  const b=e.target.closest('button[data-i]');if(!b)return;
+  $('one').innerHTML=sheetHTML(students[+b.dataset.i],+b.dataset.i);
+  $('view').hidden=false;$('view').scrollIntoView({behavior:'smooth'});
+  $('view').dataset.i=b.dataset.i;
+});
+
+function cell(g,m,f){return g==='-'?'-':`${g}${m==null?'':`<small>${m}/${f}</small>`}`;}
+function sheetHTML(s){
+  const hasAtt=!!$('attCol').value;
+  return `<div class="ms"><h3>${esc(s.name)}</h3>
+  <p class="meta">${hasAtt?`Attendance: ${s.att.toFixed(1)}% &nbsp; `:''}Total: ${s.pct.toFixed(1)}%</p>
+  <div class="wrap"><table><thead><tr><th>Subject</th><th class="c">Theory</th><th class="c">Practical</th><th class="c">Total</th><th class="c">GPA</th></tr></thead><tbody>
+  ${s.subs.map(x=>`<tr><td>${esc(x.name)}</td><td class="c">${cell(x.gT,x.t,x.tf)}</td><td class="c">${cell(x.gP,x.p,x.pf)}</td><td class="c">${x.gTot}</td><td class="c">${x.gpa.toFixed(1)}</td></tr>`).join('')}
+  </tbody><tfoot><tr><td>Final</td><td></td><td></td><td class="c">${s.grade}</td><td class="c">${s.gpa.toFixed(2)}</td></tr></tfoot></table></div>
+  <p class="meta" style="margin-top:8px">Result: <span class="${s.result==='Pass'?'pass':'fail'}">${s.result}</span></p></div>`;
+}
+
+function printSheets(list){
+  $('sheets').innerHTML=list.map(s=>sheetHTML(s)).join('');
+  document.body.classList.add('ps');
+  window.print();
+}
+window.addEventListener('afterprint',()=>{document.body.classList.remove('ps');$('sheets').innerHTML='';});
+$('prAll').addEventListener('click',()=>printSheets(students));
+$('prOne').addEventListener('click',()=>printSheets([students[+$('view').dataset.i]]));
+
+$('dl').addEventListener('click',()=>{
+  const hasAtt=!!$('attCol').value;
+  const data=students.map(s=>{
+    const o={Name:s.name};
+    if(hasAtt)o['Attendance %']=+s.att.toFixed(1);
+    s.subs.forEach(x=>{
+      if(x.gT!=='-')o[x.name+' Theory']=x.gT;
+      if(x.gP!=='-')o[x.name+' Practical']=x.gP;
+      o[x.name+' Total']=x.gTot;o[x.name+' GPA']=x.gpa;
+    });
+    o['Total %']=+s.pct.toFixed(2);o['Final GPA']=+s.gpa.toFixed(2);o['Final Grade']=s.grade;o.Result=s.result;
+    return o;
+  });
+  const book=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book,XLSX.utils.json_to_sheet(data),'Result');
+  XLSX.writeFile(book,'result.xlsx');
+});
+</script>
+</body>
+                                                                                                                                                </html>
+                                                                                                                                                
